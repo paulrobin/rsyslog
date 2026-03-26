@@ -1,0 +1,113 @@
+#####################################################
+# rsyslog TLS-Only Configuration for Red Hat
+# (RHEL, CentOS Stream, Rocky Linux, AlmaLinux)
+# Encrypts all syslog traffic, blocks UDP and plain TCP
+#####################################################
+#
+# Prerequisites:
+#   sudo dnf install rsyslog-gnutls gnutls-utils
+#
+# SELinux (run before starting rsyslog):
+#   sudo semanage port -a -t syslogd_port_t -p tcp 6514
+#   sudo semanage fcontext -a -t cert_t "/etc/rsyslog.d/keys(/.*)?"
+#   sudo restorecon -Rv /etc/rsyslog.d/keys/
+#   sudo semanage fcontext -a -t syslogd_var_lib_t "/var/spool/rsyslog(/.*)?"
+#   sudo restorecon -Rv /var/spool/rsyslog/
+#
+# Firewall:
+#   sudo firewall-cmd --permanent --add-port=6514/tcp
+#   sudo firewall-cmd --reload
+#
+
+# Load required modules
+module(load="imuxsock"
+    SysSock.Use="off")        # local system logging via Unix socket
+module(load="imjournal"
+    StateFile="imjournal.state")  # systemd journal input (Red Hat default)
+
+# Set work directory for disk-assisted queues
+$WorkDirectory /var/spool/rsyslog
+
+# ---------------------------------------------------
+# TLS Stream Driver Configuration (GnuTLS)
+# ---------------------------------------------------
+global(
+    defaultNetstreamDriver="gtls"                                          # Use GnuTLS for all TLS connections
+    defaultNetstreamDriverCAFile="/etc/rsyslog.d/keys/ca.pem"              # CA certificate (or chain) for verifying clients
+    defaultNetstreamDriverCertFile="/etc/rsyslog.d/keys/server-cert.pem"   # Server certificate for TLS
+    defaultNetstreamDriverKeyFile="/etc/rsyslog.d/keys/server-key.pem"     # Server private key for TLS
+    # defaultNetstreamDriverCRLFile="/etc/rsyslog.d/keys/crl.pem"          # CRL for revoking client certificates (uncomment when needed)
+    workDirectory="/var/spool/rsyslog"                                     # Work directory for queue files
+)
+
+# ---------------------------------------------------
+# INPUT: TLS-encrypted TCP only (port 6514)
+# ---------------------------------------------------
+# NOTE: Do NOT load imudp — UDP is intentionally blocked.
+# NOTE: Do NOT load imtcp without TLS — plain TCP is blocked.
+# NOTE: SELinux must allow port 6514: semanage port -a -t syslogd_port_t -p tcp 6514
+
+module(
+    load="imtcp"                        # Load TCP input module for TLS   
+    streamDriver.name="gtls"            # Use GnuTLS for this input
+    streamDriver.mode="1"               # TLS-only mode (no fallback to plain TCP). 1 = TLS-only, 0 = allow fallback to plain TCP
+    streamDriver.authMode="x509/name"   # Authenticate clients by their certificate name
+    permittedPeer=["syslog.prcomputing.co.uk"]  # Only allow clients with certificates matching this name
+    #
+    # --- Alternative authMode options (uncomment one to switch) ---
+    # streamDriver.authMode="anon"                   # No certificate validation. Encrypted but no identity check. NOT recommended.
+    # streamDriver.authMode="x509/certvalid"         # Validates cert is signed by trusted CA, but does NOT check subject name.
+    # streamDriver.authMode="x509/fingerprint"       # Matches exact cert fingerprint. Requires fingerprint in permittedPeer.
+    # permittedPeer=["SHA256:AA:BB:CC:..."]          # Use with x509/fingerprint: specify SHA256 or SHA1 fingerprint of client cert.
+    #
+    # --- Additional TLS hardening options ---
+    # streamDriver.checkExtendedKeyPurpose="on"      # Require TLS WWW Client/Server extended key usage in certs.
+    # streamDriver.PrioritizeSAN="on"                # Match permittedPeer against SAN only (ignore CN). Stricter, per RFC 6125.
+    # streamDriver.PermitExpiredCerts="on"           # Allow expired certificates. Emergency troubleshooting only.
+    # streamDriver.TlsVerifyDepth="2"                # Max certificate chain depth. Increase for multi-tier CA hierarchies.
+    # streamDriver.TlsRevocationCheck="on"           # Enable OCSP revocation checking for peer certificates.
+)
+
+input(
+    name="tls-input"            # Name for this input
+    type="imtcp"                # Listen for TLS-encrypted syslog messages on TCP
+    port="6514"                 # Standard port for syslog over TLS
+    keepAlive="on"              # Enable TCP keep-alive on connections
+    keepAlive.time="60"         # Seconds before first keep-alive probe
+    keepAlive.interval="10"     # Seconds between keep-alive probes
+    keepAlive.probes="3"        # Number of failed probes before dropping connection
+)    
+
+# ---------------------------------------------------
+# Local logging rules (Red Hat defaults)
+# ---------------------------------------------------
+# Log all kernel messages to the console.
+# Logging much else clutters up the screen.
+#kern.*                                              /dev/console
+
+# Log anything (except mail) of level info or higher.
+# Don't log private authentication messages!
+*.info;mail.none;authpriv.none;cron.none             /var/log/messages
+
+# The authpriv file has restricted access.
+authpriv.*                                           /var/log/secure
+
+# Log all the mail messages in one place.
+mail.*                                               -/var/log/maillog
+
+# Log cron stuff
+cron.*                                               /var/log/cron
+
+# Everybody gets emergency messages
+*.emerg                                              :omusrmsg:*
+
+# Save news errors of level crit and higher in a special file.
+uucp,news.crit                                       /var/log/spooler
+
+# Save boot messages also to boot.log
+local7.*                                             /var/log/boot.log
+
+# ---------------------------------------------------
+# Include additional configuration files
+# ---------------------------------------------------
+$IncludeConfig /etc/rsyslog.d/*.conf
