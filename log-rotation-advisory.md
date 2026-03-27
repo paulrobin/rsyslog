@@ -1,29 +1,19 @@
-# rsyslog High Volume Log Ingestion — Disk & Rotation Advisory
+# rsyslog Log Rotation — Best Practices for High Volume Servers
 
-This document outlines concerns, options, and recommendations for operating an rsyslog TLS server receiving approximately 1TB of syslog data per day.
+A guide to configuring logrotate for rsyslog on Red Hat-based systems (RHEL, CentOS, Rocky Linux, AlmaLinux) handling high volumes of syslog traffic.
 
-## Current Server State
+## Why Log Rotation Matters
 
-| Item | Current Value | Concern |
-|------|--------------|---------|
-| /var partition size | 8 GB | Will fill in minutes at 1TB/day |
-| /var available space | 6.4 GB | Insufficient for any meaningful retention |
-| Log rotation frequency | Weekly | Far too infrequent for high volume |
-| Rotated logs kept | 4 (weeks) | Would require 4+ TB uncompressed |
-| Compression | Disabled | Wastes approximately 90% of disk space |
-| Max file size trigger | None | No protection against individual files growing too large |
+rsyslog writes to plain text log files that grow indefinitely unless rotated. On a server receiving syslog from network devices, firewalls, or other infrastructure, log files can grow extremely fast. Without proper rotation:
 
-> **⚠️ Critical:** At 1TB/day ingestion, the current 8GB /var partition will fill completely within minutes, causing rsyslog to stop writing and potentially drop incoming messages. This must be addressed before going live.
+- The disk fills up and rsyslog stops writing
+- Incoming syslog messages are dropped or queued until they expire
+- System stability is affected as `/var` runs out of space
+- Other services sharing the partition may also fail
 
-## Concern 1 — Disk Space
+## Default Configuration (RHEL)
 
-The `/var` filesystem is an LVM logical volume with only 8GB allocated. All syslog files (`/var/log/messages`, `/var/log/secure`, etc.) write to this partition. At 1TB/day, the disk will fill almost immediately regardless of how aggressively logs are rotated.
-
-Even with compression (approximately 10:1 ratio for syslog text), retaining a single day of compressed logs would require around 100GB — far more than the 8GB available.
-
-## Concern 2 — Log Rotation
-
-The current logrotate configuration in `/etc/logrotate.d/rsyslog` uses global defaults:
+On a fresh RHEL-based install, rsyslog log rotation is configured in `/etc/logrotate.d/rsyslog`:
 
 ```
 /var/log/messages
@@ -40,57 +30,20 @@ The current logrotate configuration in `/etc/logrotate.d/rsyslog` uses global de
 }
 ```
 
-This inherits the global settings: weekly rotation, 4 copies kept, no compression, no size limit. For a high-volume server this provides no protection against disk exhaustion.
+This file contains no explicit rotation settings, so it inherits the global defaults from `/etc/logrotate.conf`:
 
-## Options
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| Frequency | weekly | Logs rotate once per week |
+| rotate | 4 | Keep 4 rotated copies |
+| compress | disabled | Old logs are not compressed |
+| maxsize | none | No size-based rotation trigger |
 
-### Option A — Expand /var or Add a Dedicated Data Disk
+For a low-traffic server this is adequate. For a server ingesting hundreds of gigabytes or more per day, it provides no protection against disk exhaustion.
 
-Add a large data disk to the server and either:
+## Recommended Configuration for High Volume
 
-- Extend the `/var` LV to provide more space, or
-- Mount a dedicated disk at a new path (e.g. `/var/log/remote/`) and configure rsyslog to write received logs there, keeping the OS logs on the existing partition
-
-This is the most robust option. Size the disk based on how many days of local retention are needed. For example, 1TB/day with 3 days retention compressed would need approximately 300GB minimum.
-
-### Option B — Minimal Local Retention, Rely on Azure Monitor Agent
-
-If Azure Monitor Agent (AMA) is forwarding all syslog to Microsoft Sentinel, treat the local server as a short-term buffer only:
-
-- Keep minimal local retention (hours, not days)
-- Apply aggressive logrotate settings (see Recommendations below)
-- Still requires more disk than the current 8GB — a moderately sized expansion (e.g. 50–100GB) would provide a safe buffer
-
-This reduces disk requirements but still needs expansion. If AMA forwarding stalls or falls behind, the buffer can fill quickly.
-
-### Option C — Rate Limit or Filter at Source
-
-Reduce the volume of logs arriving at the server by:
-
-- Filtering at the firewall/sender — only forward critical events rather than all traffic
-- Using rsyslog rate limiting to cap messages per second
-- Filtering by facility/severity in the rsyslog config to discard low-value messages before writing to disk
-
-This addresses the root cause if 1TB/day includes a large proportion of noise. Should be combined with Option A or B.
-
-## Recommendations
-
-### 1. Expand disk space (required)
-
-At minimum, expand the `/var` partition or add a dedicated data disk. Sizing depends on the chosen retention period:
-
-| Local Retention | Uncompressed | Compressed (approx) |
-|----------------|-------------|---------------------|
-| 6 hours | 250 GB | 25 GB |
-| 1 day | 1 TB | 100 GB |
-| 3 days | 3 TB | 300 GB |
-| 7 days | 7 TB | 700 GB |
-
-> **Note:** Compression ratios for syslog text are typically 10:1 but can vary depending on message content. Add a 20–30% safety margin to the compressed estimates.
-
-### 2. Apply aggressive logrotate configuration
-
-Replace the contents of `/etc/logrotate.d/rsyslog` with settings appropriate for high volume:
+Replace the contents of `/etc/logrotate.d/rsyslog` with:
 
 ```
 /var/log/messages
@@ -113,36 +66,126 @@ Replace the contents of `/etc/logrotate.d/rsyslog` with settings appropriate for
 }
 ```
 
-This config will:
+### What each setting does
 
-- **hourly** — rotate every hour instead of weekly
-- **rotate 24** — keep 24 rotated files (approximately 1 day of history)
-- **maxsize 500M** — rotate immediately if any log exceeds 500MB, even between hourly runs
-- **compress** — gzip old logs, saving approximately 90% of disk space
-- **delaycompress** — keep the most recent rotated file uncompressed for easier troubleshooting
+| Setting | Purpose |
+|---------|---------|
+| `hourly` | Rotate every hour instead of weekly |
+| `rotate 24` | Keep 24 rotated files — approximately 1 day of history |
+| `maxsize 500M` | Rotate immediately if a log exceeds 500MB, even between scheduled runs |
+| `compress` | Gzip old log files, saving approximately 90% of disk space |
+| `delaycompress` | Keep the most recent rotated file uncompressed for easier troubleshooting |
+| `missingok` | Don't error if a log file is missing |
+| `notifempty` | Don't rotate if the log file is empty |
+| `sharedscripts` | Run the postrotate script once for all files, not once per file |
+| `postrotate` | Sends SIGHUP to rsyslog so it reopens log files after rotation |
 
-> **Note:** Logrotate must be triggered hourly for the *hourly* directive to work. This requires enabling an hourly cron job or systemd timer for logrotate.
+### Adjusting for your environment
 
-### 3. Enable hourly logrotate execution
+- **Lower volume (~10–50 GB/day):** `daily` with `rotate 7` and `maxsize 1G` may be sufficient
+- **Very high volume (1 TB+/day):** Reduce `maxsize` to `200M` and increase `rotate` if disk allows
+- **Longer retention needed:** Increase `rotate` — e.g. `rotate 168` for 7 days at hourly rotation
+- **Disk constrained:** Reduce `rotate` to keep fewer copies
 
-By default, logrotate runs daily via cron or systemd timer. For hourly rotation, ensure it runs every hour:
+## Enabling Hourly Logrotate
+
+By default, logrotate runs once per day via cron or a systemd timer. The `hourly` directive only works if logrotate itself is triggered every hour.
+
+**Option 1 — Copy the cron job:**
 
 ```bash
 sudo cp /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
 ```
 
-Or configure the systemd logrotate timer to run hourly if the system uses timers instead of cron.
+**Option 2 — Modify the systemd timer (if your system uses timers):**
 
-### 4. Monitor disk usage
+Check current schedule:
 
-Set up monitoring to alert if `/var` usage exceeds 80%. This provides early warning before the disk fills completely. Azure Monitor can be configured to alert on disk space metrics.
+```bash
+systemctl list-timers | grep logrotate
+```
 
-## Summary
+Override the timer to run hourly:
 
-| Action | Priority | Status |
-|--------|----------|--------|
-| Expand /var or add data disk | Critical — must be done before go-live | Pending |
-| Update logrotate config | Critical — must be done before go-live | Pending |
-| Enable hourly logrotate | High — required for hourly rotation to work | Pending |
-| Set up disk usage alerting | Recommended | Pending |
-| Review source log filtering | Recommended — may significantly reduce volume | Pending |
+```bash
+sudo systemctl edit logrotate.timer
+```
+
+Add:
+
+```ini
+[Timer]
+OnCalendar=
+OnCalendar=hourly
+```
+
+Then reload:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+## Disk Sizing Guidelines
+
+When planning disk space for a syslog server, consider the ingestion rate and desired retention period. Syslog text typically compresses at approximately 10:1 with gzip.
+
+| Daily Ingestion | Retention | Uncompressed | Compressed (approx) |
+|----------------|-----------|-------------|---------------------|
+| 10 GB/day | 7 days | 70 GB | 7 GB |
+| 50 GB/day | 7 days | 350 GB | 35 GB |
+| 100 GB/day | 3 days | 300 GB | 30 GB |
+| 500 GB/day | 1 day | 500 GB | 50 GB |
+| 1 TB/day | 1 day | 1 TB | 100 GB |
+| 1 TB/day | 3 days | 3 TB | 300 GB |
+
+> **Tip:** Add a 20–30% safety margin to compressed estimates. Compression ratios vary depending on message content — structured or repetitive messages compress better than random data.
+
+### Dedicated log partition
+
+For high-volume servers, mount a separate partition or disk for log storage. This prevents log growth from affecting the operating system or other services:
+
+```bash
+# Example: mount a dedicated disk at /var/log
+sudo mkfs.xfs /dev/sdX
+sudo mount /dev/sdX /var/log
+```
+
+Add to `/etc/fstab` for persistence. If using LVM, extend the existing `/var` logical volume instead.
+
+## Monitoring Disk Usage
+
+Set up alerting to catch disk issues before they cause log loss:
+
+- Alert at **80% usage** — investigate and clean up or expand
+- Alert at **90% usage** — immediate action required
+- Alert at **95% usage** — critical, log loss may be imminent
+
+Most monitoring solutions (Azure Monitor, Prometheus, Zabbix, Nagios) can track filesystem usage and trigger alerts at defined thresholds.
+
+## Additional Considerations
+
+### rsyslog disk-assisted queues
+
+rsyslog can buffer messages in a disk-assisted queue when the output (e.g. forwarding to a SIEM) is temporarily unavailable. These queue files are stored in the `WorkDirectory` (typically `/var/spool/rsyslog/`) and also consume disk space. Account for this when sizing the partition.
+
+### Forwarding to a SIEM
+
+If logs are being forwarded to a central SIEM (e.g. Microsoft Sentinel, Splunk, Elastic), the local server may only need to retain logs as a short-term buffer. In this case:
+
+- Keep local retention to hours rather than days
+- Size the disk to handle a forwarding backlog (e.g. if the SIEM is unreachable for several hours)
+- Monitor the rsyslog queue size to detect forwarding issues early
+
+### Testing rotation
+
+After changing the logrotate config, do a dry run to verify it works:
+
+```bash
+sudo logrotate -d /etc/logrotate.d/rsyslog
+```
+
+This shows what logrotate would do without making changes. To force an immediate rotation:
+
+```bash
+sudo logrotate -f /etc/logrotate.d/rsyslog
+```
