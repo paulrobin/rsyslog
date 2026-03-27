@@ -189,3 +189,90 @@ This shows what logrotate would do without making changes. To force an immediate
 ```bash
 sudo logrotate -f /etc/logrotate.d/rsyslog
 ```
+
+## Dedicated Disk for Remote Syslog
+
+For high-volume environments, mount a separate disk specifically for remote syslog. This isolates remote log traffic from the OS partition, preventing log growth from affecting system stability.
+
+### rsyslog configuration
+
+Add the following to `/etc/rsyslog.conf` **before** the existing local logging rules. This directs all remotely received syslog to the new disk while local OS logs remain on the original `/var/log/` partition.
+
+**Option A — Separate file per host and program:**
+
+```
+# ---------------------------------------------------
+# Remote syslog — write to dedicated disk
+# ---------------------------------------------------
+template(name="RemoteLog" type="string"
+    string="/var/log/remote/%HOSTNAME%/%PROGRAMNAME%.log")
+
+if $fromhost-ip != '127.0.0.1' then {
+    action(type="omfile" dynaFile="RemoteLog")
+    stop
+}
+```
+
+This creates a folder structure like:
+
+```
+/var/log/remote/
+  firewall01/
+    kernel.log
+    syslogd.log
+  switch01/
+    mgmt.log
+```
+
+**Option B — Single file for all remote syslog:**
+
+```
+if $fromhost-ip != '127.0.0.1' then {
+    action(type="omfile" file="/var/log/remote/syslog.log")
+    stop
+}
+```
+
+The `stop` directive prevents remote messages from also being written to `/var/log/messages`.
+
+### Logrotate configuration for the new location
+
+Create a new file `/etc/logrotate.d/rsyslog-remote`:
+
+```
+/var/log/remote/*.log
+/var/log/remote/**/*.log
+{
+    hourly
+    rotate 24
+    maxsize 500M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        /usr/bin/systemctl -s HUP kill rsyslog.service >/dev/null 2>&1 || true
+    endscript
+}
+```
+
+The existing `/etc/logrotate.d/rsyslog` continues to handle local OS logs on the original disk — no changes needed there.
+
+### SELinux labelling
+
+If SELinux is enabled, label the new directory so rsyslog can write to it:
+
+```bash
+sudo semanage fcontext -a -t var_log_t "/var/log/remote(/.*)?"
+sudo restorecon -Rv /var/log/remote
+```
+
+### Summary of changes
+
+| File | Change |
+|------|--------|
+| `/etc/rsyslog.conf` | Add template and rule to direct remote syslog to `/var/log/remote/` |
+| `/etc/logrotate.d/rsyslog-remote` | New file — rotation config for the remote log location |
+| SELinux | Label `/var/log/remote/` as `var_log_t` |
+| `/etc/logrotate.d/rsyslog` | No change — continues to handle local OS logs |
