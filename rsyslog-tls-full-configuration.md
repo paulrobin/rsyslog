@@ -417,14 +417,14 @@ AMA was installed as an Azure VM extension via the Azure portal (Sentinel → Da
 
 | Property | Value |
 |----------|-------|
-| DCR ID | `dcr-316dd192dc1e4754bdab4a160aacbf80` |
-| Subscription | `72cf9259-8010-4b21-9791-423900f34e25` |
-| Resource Group | `ulrobinson.com` |
-| VM | `LinuxConnecter` |
-| Region | `uksouth` |
-| Destination stream | `LINUX_SYSLOGS_BLOB` |
-| Solution | `LogManagement` |
-| Log Analytics endpoint | `da6958c9-d107-4636-a787-e88028f3c7ff.ods.opinsights.azure.com` |
+| DCR ID | `*********************` |
+| Subscription | `********************` |
+| Resource Group | `****************` |
+| VM | `***********` |
+| Region | `************` |
+| Destination stream | `*************` |
+| Solution | `**************` |
+| Log Analytics endpoint | `*****************` |
 
 ### Facilities Collected
 
@@ -456,7 +456,7 @@ Syslog
 
 ## 9. Files Required on Each Host
 
-### Syslog Server (10.0.0.19)
+### Syslog Server (***********)
 
 | File | Path |
 |------|------|
@@ -467,7 +467,7 @@ Syslog
 
 > **Note:** `ca-key.pem` is only needed for signing new certificates. Keep it secure.
 
-### Firewall / Sender (10.0.0.20)
+### Firewall / Sender (**********)
 
 | File | Purpose |
 |------|---------|
@@ -482,7 +482,7 @@ Syslog
 | Layer | Status | Notes |
 |-------|--------|-------|
 | UFW (host firewall) | Inactive | Not enabled — consider enabling for defence in depth |
-| Azure NSG | Must allow inbound | TCP port 6514 from 10.0.0.20 to 10.0.0.19 |
+| Azure NSG | Must allow inbound | TCP port 6514 from ********** to *********** |
 
 **Recommended UFW configuration (if enabling):**
 
@@ -490,7 +490,7 @@ Syslog
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow ssh
-sudo ufw allow from 10.0.0.20 to any port 6514 proto tcp
+sudo ufw allow from ************ to any port 6514 proto tcp
 sudo ufw enable
 ```
 
@@ -535,7 +535,7 @@ sudo journalctl -u rsyslog --since "$(systemctl show rsyslog --property=ActiveEn
 
 **Source:** `ss -tnp`
 
-Shows live TCP connections on port 6514. An ESTABLISHED connection from 10.0.0.20 confirms the firewall has an active TLS session.
+Shows live TCP connections on port 6514. An ESTABLISHED connection from ************ confirms the firewall has an active TLS session.
 
 ```bash
 sudo ss -tnp | grep 6514
@@ -544,7 +544,7 @@ sudo ss -tnp | grep 6514
 Expected output:
 
 ```
-ESTAB  10.0.0.19:6514  10.0.0.20:xxxxx  rsyslogd
+ESTAB  ************:6514  ************:xxxxx  rsyslogd
 ```
 
 **What it proves:** There is a live TCP connection from the firewall to the TLS syslog port.
