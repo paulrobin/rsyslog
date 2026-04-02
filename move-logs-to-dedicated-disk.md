@@ -106,7 +106,7 @@ global(
 )
 ```
 
-### Update local log paths (if moving local logs too)
+###6.1 Update local log paths (if moving local logs too)
 
 Replace the existing local logging rules with the new paths:
 
