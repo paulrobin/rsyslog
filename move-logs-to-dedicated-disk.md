@@ -93,22 +93,6 @@ global(
 )
 ```
 
-### Add a rule for remote logs (optional)
-
-Add this **before** the local logging rules to write remote syslog to the new disk, separated by hostname:
-
-```
-template(name="RemoteLog" type="string"
-    string="/data/var/log/remote/%HOSTNAME%/%PROGRAMNAME%.log")
-
-if $fromhost-ip != '127.0.0.1' then {
-    action(type="omfile" dynaFile="RemoteLog")
-    stop
-}
-```
-
-This creates a folder per sending hostname under `/data/var/log/remote/` with a separate file per program. The `stop` directive prevents remote messages from also being written to local log files.
-
 ### Update local log paths (if moving local logs too)
 
 Replace the existing local logging rules with the new paths:
