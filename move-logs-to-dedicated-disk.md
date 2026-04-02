@@ -190,8 +190,6 @@ Force an immediate rotation:
 ```bash
 sudo logrotate -f /etc/logrotate.d/rsyslog
 ```
-}
-```
 
 ## 8. Validate and Restart
 
