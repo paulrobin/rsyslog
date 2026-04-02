@@ -82,7 +82,20 @@ Edit `/etc/rsyslog.conf` and make the following changes:
 $WorkDirectory /data/var/spool/rsyslog
 ```
 
-Tells rsyslog to use the new spool directory for disk-assisted queues. **Important:** This line must appear before any `module()` directives — particularly `imjournal`, which resolves its `StateFile` path relative to `$WorkDirectory`. If `$WorkDirectory` comes after the module load, the state file will be written to `/` and SELinux will block it.
+Tells rsyslog to use the new spool directory for disk-assisted queues. 
+
+**Important:** This line must appear before any `module()` directives — particularly `imjournal`, which resolves its `StateFile` path relative to `$WorkDirectory`. If `$WorkDirectory` comes after the module load, the state file will be written to `/` and SELinux will block it.
+
+```
+#Set work directory for disk assisted queues
+$WorkDirectory /data/var/spool/rsyslog
+
+# Load required modules
+module(load="imuxsock"
+    SysSock.Use="off")        # local system logging via Unix socket
+module(load="imjournal"
+    StateFile="imjournal.state")  # systemd journal input (Red Hat default)
+```
 
 Also update the `global()` block if it contains a `workDirectory` setting:
 
