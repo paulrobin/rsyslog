@@ -1,4 +1,4 @@
-# Moving rsyslog Logs to a Dedicated Disk — /data/var/
+# Moving rsyslog Logs to a Dedicated Disk and log rotation — /data/var/
 
 Guide for moving rsyslog log files and spool directory to a dedicated disk mounted at `/data/var/` on RHEL-based systems with SELinux enabled.
 
