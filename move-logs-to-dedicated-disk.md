@@ -160,7 +160,8 @@ Add:
 OnCalendar=
 OnCalendar=hourly
 ```
-The blank one is needed. It clears the existing default schedule before setting the new one. If you skip the blank line, logrotate would run both daily and hourly.
+Ensure the settings are placed inbetween the comments.
+The blank OnCalendar is needed. It clears the existing default schedule before setting the new one. If you skip the blank line, logrotate would run both daily and hourly.
 
 Then reload:
 
